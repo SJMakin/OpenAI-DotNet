@@ -1,3 +1,4 @@
+using OpenAI.Extensions;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -44,7 +45,7 @@ namespace OpenAI.Chat
         /// <param name="cancellationToken">Optional, <see cref="CancellationToken"/>.</param>
         /// <returns><see cref="ChatResponse"/>.</returns>
         /// <exception cref="HttpRequestException">Raised when the HTTP request fails</exception>
-        public async Task StreamCompletionAsync(ChatRequest chatRequest, Action<ChatResponse> resultHandler, CancellationToken cancellationToken = default)
+        public async Task<ChatResponse> StreamCompletionAsync(ChatRequest chatRequest, Action<ChatResponse> resultHandler, CancellationToken cancellationToken = default)
         {
             chatRequest.Stream = true;
             var jsonContent = JsonSerializer.Serialize(chatRequest, Api.JsonSerializationOptions).ToJsonStringContent();
@@ -52,28 +53,40 @@ namespace OpenAI.Chat
             {
                 Content = jsonContent
             };
-            var response = await Api.Client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
-            await response.CheckResponseAsync(cancellationToken);
+            var response = await Api.Client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+            await response.CheckResponseAsync(cancellationToken).ConfigureAwait(false);
             await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
             using var reader = new StreamReader(stream);
+            ChatResponse chatResponse = null;
 
-            while (await reader.ReadLineAsync() is { } line)
+            while (await reader.ReadLineAsync().ConfigureAwait(false) is { } streamData)
             {
-                if (line.StartsWith("data: "))
+                cancellationToken.ThrowIfCancellationRequested();
+
+                if (!streamData.TryGetEventStreamData(out var eventData)) { continue; }
+                if (string.IsNullOrWhiteSpace(eventData)) { continue; }
+
+                var partialResponse = response.DeserializeResponse<ChatResponse>(eventData, Api.JsonSerializationOptions);
+
+                if (chatResponse == null)
                 {
-                    line = line["data: ".Length..];
+                    chatResponse = new ChatResponse(partialResponse);
+                }
+                else
+                {
+                    chatResponse.CopyFrom(partialResponse);
                 }
 
-                if (line == "[DONE]")
-                {
-                    return;
-                }
-
-                if (!string.IsNullOrWhiteSpace(line))
-                {
-                    resultHandler(response.DeserializeResponse<ChatResponse>(line.Trim(), Api.JsonSerializationOptions));
-                }
+                resultHandler(partialResponse);
             }
+
+            response.EnsureSuccessStatusCode();
+
+            if (chatResponse == null) { return null; }
+
+            chatResponse.SetResponseData(response.Headers);
+            resultHandler(chatResponse);
+            return chatResponse;
         }
 
         /// <summary>
@@ -93,29 +106,39 @@ namespace OpenAI.Chat
             {
                 Content = jsonContent
             };
-            var response = await Api.Client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
-            await response.CheckResponseAsync(cancellationToken);
+            var response = await Api.Client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+            await response.CheckResponseAsync(cancellationToken).ConfigureAwait(false);
             await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
             using var reader = new StreamReader(stream);
+            ChatResponse chatResponse = null;
 
-            while (await reader.ReadLineAsync() is { } line &&
-                   !cancellationToken.IsCancellationRequested)
+            while (await reader.ReadLineAsync() is { } streamData)
             {
-                if (line.StartsWith("data: "))
+                cancellationToken.ThrowIfCancellationRequested();
+
+                if (!streamData.TryGetEventStreamData(out var eventData)) { continue; }
+                if (string.IsNullOrWhiteSpace(eventData)) { continue; }
+
+                var partialResponse = response.DeserializeResponse<ChatResponse>(eventData, Api.JsonSerializationOptions);
+
+                if (chatResponse == null)
                 {
-                    line = line["data: ".Length..];
+                    chatResponse = new ChatResponse(partialResponse);
+                }
+                else
+                {
+                    chatResponse.CopyFrom(partialResponse);
                 }
 
-                if (line == "[DONE]")
-                {
-                    yield break;
-                }
-
-                if (!string.IsNullOrWhiteSpace(line))
-                {
-                    yield return response.DeserializeResponse<ChatResponse>(line.Trim(), Api.JsonSerializationOptions);
-                }
+                yield return partialResponse;
             }
+
+            response.EnsureSuccessStatusCode();
+
+            if (chatResponse == null) { yield break; }
+
+            chatResponse.SetResponseData(response.Headers);
+            yield return chatResponse;
         }
     }
 }

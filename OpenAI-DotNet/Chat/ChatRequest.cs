@@ -1,8 +1,8 @@
-using OpenAI.Models;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 
 namespace OpenAI.Chat
@@ -12,9 +12,12 @@ namespace OpenAI.Chat
         /// <summary>
         /// Constructor.
         /// </summary>
-        /// <param name="messages"></param>
+        /// <param name="messages">
+        /// The list of messages for the current chat session.
+        /// </param>
         /// <param name="model">
-        /// ID of the model to use. Currently, only gpt-3.5-turbo and gpt-3.5-turbo-0301 are supported.
+        /// Id of the model to use.<br/>
+        /// Currently, only gpt-4 and gpt-3.5-turbo and their variants are supported.
         /// </param>
         /// <param name="temperature">
         /// What sampling temperature to use, between 0 and 2.
@@ -65,9 +68,15 @@ namespace OpenAI.Chat
         /// <param name="user">
         /// A unique identifier representing your end-user, which can help OpenAI to monitor and detect abuse.
         /// </param>
+        /// <param name="functionCall">
+        /// Pass "auto" to let the OpenAI service decide, "none" if none are to be called, or "functionName" to force function call. Defaults to "auto".
+        /// </param>
+        /// <param name="functions">
+        /// An optional list of functions to get arguments for.  Null or empty for none.
+        /// </param>
         public ChatRequest(
-            IEnumerable<ChatPrompt> messages,
-            Model model = null,
+            IEnumerable<Message> messages,
+            string model = null,
             double? temperature = null,
             double? topP = null,
             int? number = null,
@@ -75,10 +84,12 @@ namespace OpenAI.Chat
             int? maxTokens = null,
             double? presencePenalty = null,
             double? frequencyPenalty = null,
-            Dictionary<string, double> logitBias = null,
-            string user = null)
+            IReadOnlyDictionary<string, double> logitBias = null,
+            string user = null,
+            string functionCall = null,
+            IEnumerable<Function> functions = null)
         {
-            Model = model ?? Models.Model.GPT3_5_Turbo;
+            Model = string.IsNullOrWhiteSpace(model) ? Models.Model.GPT3_5_Turbo : model;
 
             if (!Model.Contains("turbo") &&
                 !Model.Contains("gpt-4"))
@@ -102,6 +113,30 @@ namespace OpenAI.Chat
             FrequencyPenalty = frequencyPenalty;
             LogitBias = logitBias;
             User = user;
+
+            var functionList = functions?.ToList();
+
+            if (functionList != null && functionList.Any())
+            {
+                if (string.IsNullOrWhiteSpace(functionCall))
+                {
+                    FunctionCall = "auto";
+                }
+                else
+                {
+                    if (!functionCall.Equals("none") &&
+                        !functionCall.Equals("auto"))
+                    {
+                        FunctionCall = new JsonObject { ["name"] = functionCall };
+                    }
+                    else
+                    {
+                        FunctionCall = functionCall;
+                    }
+                }
+            }
+
+            Functions = functionList?.ToList();
         }
 
         /// <summary>
@@ -114,7 +149,7 @@ namespace OpenAI.Chat
         /// The messages to generate chat completions for, in the chat format.
         /// </summary>
         [JsonPropertyName("messages")]
-        public IReadOnlyList<ChatPrompt> Messages { get; }
+        public IReadOnlyList<Message> Messages { get; }
 
         /// <summary>
         /// What sampling temperature to use, between 0 and 2.
@@ -200,6 +235,21 @@ namespace OpenAI.Chat
         [JsonPropertyName("user")]
         public string User { get; }
 
+        /// <summary>
+        /// Pass "auto" to let the OpenAI service decide, "none" if none are to be called, or "functionName" to force function call. Defaults to "auto".
+        /// </summary>
+        [JsonPropertyName("function_call")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+        public dynamic FunctionCall { get; }
+
+        /// <summary>
+        /// An optional list of functions to get arguments for.
+        /// </summary>
+        [JsonPropertyName("functions")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+        public IReadOnlyList<Function> Functions { get; }
+
+        /// <inheritdoc />
         public override string ToString() => JsonSerializer.Serialize(this);
     }
 }

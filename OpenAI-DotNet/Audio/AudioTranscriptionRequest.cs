@@ -1,10 +1,9 @@
 ﻿using System;
 using System.IO;
-using OpenAI.Models;
 
 namespace OpenAI.Audio
 {
-    public sealed class AudioTranscriptionRequest
+    public sealed class AudioTranscriptionRequest : IDisposable
     {
         /// <summary>
         /// Constructor.
@@ -40,10 +39,10 @@ namespace OpenAI.Audio
         /// </param>
         public AudioTranscriptionRequest(
             string audioPath,
-            Model model = null,
+            string model = null,
             string prompt = null,
             AudioResponseFormat responseFormat = AudioResponseFormat.Json,
-            int? temperature = null,
+            float? temperature = null,
             string language = null)
             : this(File.OpenRead(audioPath), Path.GetFileName(audioPath), model, prompt, responseFormat, temperature, language)
         {
@@ -87,10 +86,10 @@ namespace OpenAI.Audio
         public AudioTranscriptionRequest(
             Stream audio,
             string audioName,
-            Model model = null,
+            string model = null,
             string prompt = null,
             AudioResponseFormat responseFormat = AudioResponseFormat.Json,
-            int? temperature = null,
+            float? temperature = null,
             string language = null)
         {
             Audio = audio;
@@ -102,7 +101,7 @@ namespace OpenAI.Audio
 
             AudioName = audioName;
 
-            Model = model ?? Models.Model.Whisper1;
+            Model = string.IsNullOrWhiteSpace(model) ? Models.Model.Whisper1 : model;
 
             if (!Model.Contains("whisper"))
             {
@@ -150,7 +149,7 @@ namespace OpenAI.Audio
         /// the model will use log probability to automatically increase the temperature until certain thresholds are hit.<br/>
         /// Defaults to 0
         /// </summary>
-        public int? Temperature { get; }
+        public float? Temperature { get; }
 
         /// <summary>
         /// Optional, The language of the input audio.
